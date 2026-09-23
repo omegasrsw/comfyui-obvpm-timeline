@@ -40,12 +40,12 @@ existing four output sockets keep their indices; **chunk_audio** is appended.
 
 ## Audio row controls
 
-- **place s** sets the audio anchor on the original timeline. Dragging the
-  waveform changes this value at video-frame precision.
-- **source s** is the source-file time at that anchor. For example, `67`
+- **place s** sets the audio anchor on the original timeline. **Shift-dragging
+  the timeline waveform** changes this value at video-frame precision.
+- **source start s** is the source-file time at that anchor. For example, `67`
   starts the initial take from 67 seconds into a song. A prepend can then
   use the earlier part of that same file.
-- **length s** limits the audio after the source offset. `0` uses the rest
+- **duration s** limits the audio after the source offset. `0` uses the rest
   of the file. Before the beginning or after the end of the available
   source, the generation window is padded with encoded silence.
 - **lip sync** controls audio denoise during sampling, default `0.5`.
@@ -53,8 +53,24 @@ existing four output sockets keep their indices; **chunk_audio** is appended.
   Save and Trim and Save nodes always write the original waveform and
   store the supplied audio latent for later continuation. `0` holds the
   supplied audio latent throughout sampling.
-- **▶** auditions the source from the selected offset. The shaded waveform
-  region follows the existing next-run placement indicator.
+- **cursor s** seeks to an exact time in the source file. Clicking or dragging
+  either waveform also seeks, without changing the generation settings.
+- **▶** plays or pauses from the cursor and resumes where you paused.
+- **▶ selection** starts at **source start s** and stops automatically at the
+  selected end. Pausing/resuming keeps that end boundary; seeking elsewhere
+  returns to auditioning freely from the new cursor.
+
+The lower **Source** waveform shows the entire file and highlights the selected
+range in green. Drag either green edge to trim the range, or **Shift-drag** across
+the source waveform to select a new one. The start and duration fields update
+together. The yellow cursor appears on both waveforms; the upper waveform still
+uses the video timeline's scale and shows the shaded next-generation region.
+
+For example, set **source start s** to `30` and **duration s** to `8`, then click
+**▶ selection** to audition seconds 30–38. Those values are also used for future
+generation windows. They do not change the video duration: choose the Timeline's
+video duration separately. If a generation extends past the available selection,
+its audio is padded with silence. Preview controls do not queue a generation.
 
 ## Chunk and bridge timing
 

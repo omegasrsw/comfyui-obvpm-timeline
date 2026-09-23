@@ -12,7 +12,7 @@ And it also supports creating seamless looping videos.
 
 ## Custom audio in this fork
 
-- **Audio row below the video timeline:** upload or drop one soundtrack, view its waveform, audition it, and adjust its placement and source offset.
+- **Audio row below the video timeline:** upload or drop one soundtrack, seek with a visible audio cursor, select a source range, and audition that range before generating.
 - **Audio conditioning for lip sync:** the matching source audio is encoded into H3's audio latent during generation. The pack's Save / Trim and Save nodes write the original waveform into the saved video.
 - **Automatic chunk timing:** generate, extend, prepend, and bridge operations select their own audio start time and duration from the actual video frame range. Pinned overlaps are included, and picture and sound are trimmed together at the joins.
 - **Audio output for transcription:** Timeline's new **chunk_audio** output provides the exact waveform used for the upcoming chunk, including its overlaps, so an ASR model can transcribe it before the video prompt is encoded.
@@ -117,11 +117,17 @@ If you already installed this fork, run `git pull` inside its folder, restart Co
 
 | Audio control | What it does |
 | --- | --- |
-| **place s** | Places the audio anchor on the original timeline. You can also drag the waveform. |
-| **source s** | Selects the source-file time at that anchor. For example, `30` starts the initial take at 30 seconds into the file, leaving earlier audio available for prepends. |
-| **length s** | Limits the source duration after the offset; `0` uses the rest of the file. Windows outside the available source are padded with silence. |
+| **place s** | Places the audio anchor on the original timeline. You can also **Shift-drag the timeline waveform**. |
+| **source start s** | Selects the source-file time at that anchor. For example, `30` starts the initial take at 30 seconds into the file, leaving earlier audio available for prepends. |
+| **duration s** | Limits the source duration after the offset; `0` uses the rest of the file. Windows outside the available source are padded with silence. |
 | **lip sync** | Sets audio denoise during sampling; default `0.5`. `0` holds the supplied audio latent fixed. The pack's saver still delivers the original waveform. |
-| **▶ / ×** | Auditions the source from the selected offset / removes the custom track. |
+| **cursor s / ▶** | Seeks to an exact source time / plays or pauses from the cursor without restarting. |
+| **▶ selection** | Plays from the selected source start and automatically stops at the selected end. |
+| **×** | Removes the custom track. |
+
+Click or drag on either waveform to seek. The lower **Source** waveform shows the whole file: drag its green selection edges, or **Shift-drag** across it to select a new range. The **source start s** and **duration s** fields update to match. For example, set start to `30` and duration to `8`, then click **▶ selection** to check seconds 30–38. Use **▶** to pause/resume that preview; seeking elsewhere lets you audition from the new cursor.
+
+Seeking only changes the preview cursor. Changing the selection changes the audio used for future generations. The selected audio duration does not change the video generation duration; set the Timeline's video duration separately.
 
 ### Wiring another workflow
 
