@@ -911,11 +911,11 @@ class H3Timeline:
 
     CATEGORY = "obvpm/h3"
     FUNCTION = "emit"
-    RETURN_TYPES = (wt.PINSPECS, "INT", "STRING", "BOOLEAN")
-    RETURN_NAMES = ("pin_specs", "length", "sequence", "upscaling")
+    RETURN_TYPES = (wt.PINSPECS, "INT", "STRING", "BOOLEAN", "AUDIO")
+    RETURN_NAMES = ("pin_specs", "length", "sequence", "upscaling", "chunk_audio")
     OUTPUT_TOOLTIPS = (
         "Pin spec for the clip pinned in the timeline widget (extend/"
-        "prepend); empty when nothing is pinned. Wire to H3MCtxApplyPins "
+        "prepend), plus the custom audio track when set. Wire to H3MCtxApplyPins "
         "to generate the next clip straight from the timeline.",
         "duration_seconds as a frame count, snapped to the grid THIS "
         "pin needs -- the shared AV grid when the arrival masks (so the "
@@ -932,6 +932,10 @@ class H3Timeline:
         "(the generation branch muted when this is true, the refine "
         "branch when it is false, through a Not node) so one switch "
         "decides and the branches cannot disagree.",
+        "The custom audio window for the NEXT generation, including pinned "
+        "head/tail and bridge overlaps, before VAE encoding. Feed to ASR and "
+        "use its transcript in the video prompt. None without custom audio "
+        "or in upscale mode. Wire length to the generation latent so they agree.",
     )
     DESCRIPTION = (
         "Timeline editor for composed clips: seam-aware blocks, "
@@ -1160,17 +1164,24 @@ class H3Timeline:
                                "the strip's upscale toggle; comes out on "
                                "the upscaling output for the Mute If gates.",
                 }),
+                "audio_track": ("STRING", {"default": "", "multiline": False,
+                    "tooltip": "Custom audio row state, managed by the timeline."}),
             },
         }
 
     @classmethod
-    def IS_CHANGED(cls, pin_state="", **_):
+    def IS_CHANGED(cls, pin_state="", audio_track="", **_):
         # Re-run when the pin selection OR the pinned file(s) change
         # (same clip name, new content after a re-save).
         state = cls._parse_pin_state(pin_state)
-        if state is None:
-            return ""
         sig = pin_state
+        if audio_track:
+            from .timeline_audio import parse_track, track_id
+            track = parse_track(audio_track)
+            if track:
+                sig += track_id(track)
+        if state is None:
+            return sig
         for key in ("source", "source2"):
             if not state.get(key):
                 continue
@@ -1356,18 +1367,27 @@ class H3Timeline:
                       else "17k+5 ladder"))
 
     def emit(self, sequence="", pin_state="", duration_seconds=8.0,
-             upscaling=False, **_):
+             upscaling=False, audio_track="", **_):
         # A graph saved while this was the run_mode combo hands over its
         # string; "upscale" is the only value that meant on
         if isinstance(upscaling, str):
             upscaling = upscaling.strip().lower() in ("upscale", "true", "1")
         upscaling = bool(upscaling)
+        from .timeline_audio import parse_track, prepare_chunk_audio
+        track = parse_track(audio_track)
         state = self._parse_pin_state(pin_state)
         length, phrase = self._emit_length(state, duration_seconds)
+
+        def result(specs):
+            if track and not upscaling:
+                audio_spec = prepare_chunk_audio(specs, track, sequence, length)
+                return (specs + [audio_spec], length, sequence, upscaling, audio_spec["audio"])
+            return (specs, length, sequence, upscaling, None)
+
         _LOG.info("obvpm.h3: timeline run: %s; length %s",
                   "upscale and render" if upscaling else "generate", phrase)
         if state is None:
-            return ([], length, sequence, upscaling)
+            return result([])
         # The soft hold applies to the ARRIVING side only: the
         # departing side of a bridge is a masked extend, which is
         # already seamless and has nothing to gain from being loosened.
@@ -1402,7 +1422,7 @@ class H3Timeline:
                       state["source2"], arrive,
                       _shape_note(shape) if shaped else "",
                       state["window"])
-            return (specs, length, sequence, upscaling)
+            return result(specs)
         specs = self._specs_for(state["source"], state["role"],
                                 state["window"], state.get("cut"),
                                 state["mode"], mask_shape=shape)
@@ -1412,7 +1432,7 @@ class H3Timeline:
                   state["window"],
                   "" if state.get("cut") is None
                   else ", from the cut at frame %d" % state["cut"])
-        return (specs, length, sequence, upscaling)
+        return result(specs)
 
 
 class H3Assemble:

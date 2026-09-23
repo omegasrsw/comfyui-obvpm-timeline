@@ -43,6 +43,7 @@ Every generated clip is saved together with a motion context file (`.mctx`) that
 
 **Timeline**
 
+- **Custom audio for lip sync**: upload or drop a soundtrack onto the audio row below the video strip. Generation, extension, prepending and bridges automatically encode the matching audio window, including pinned overlap. See [custom audio setup and timing](docs/custom-audio.md).
 - **Mini Video Editor**: Drag in clips from anywhere, reorder them by dragging, trim the ends, cut left / cut right at the playhead, undo cuts, and open gaps.
 - **Quick preview**: plays through the clips right away. **Full preview** assembles them into a single video file, losslessly where possible. **Export** saves the finished video.
 - **Load Settings, Prompts from Clips**: restores the prompt, seed, settings and references that a clip was generated with, so you don't have to keep track of them yourself.

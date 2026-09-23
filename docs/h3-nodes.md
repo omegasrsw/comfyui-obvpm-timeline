@@ -245,6 +245,12 @@ mid-graph; H3 MCtx Trim and Save Video does the same trim internally.
 
 ## H3 MCtx Timeline
 
+The custom audio row below the video strip uploads a soundtrack and carries
+its timing through `pin_specs` to Apply Pins. The audio VAE input on Apply
+Pins is required when using this row. Generation windows include both pin
+overlaps; the pack's Save nodes preserve the original soundtrack. See
+[custom audio setup and timing](custom-audio.md).
+
 The composition hub — see the [widget guide](h3.md#the-timeline-widget)
 for the interactive parts (strip, seam menus, pinning, preview,
 export). The node itself:
@@ -271,7 +277,10 @@ export). The node itself:
 | `duration_seconds` | FLOAT | how long the next generation should be; the `length` output converts and snaps it |
 | `upscaling` | BOOLEAN (toolbar) | which half of the workflow a Run is for: off generates the next take, on refines the whole timeline and renders the full sequence. Driven by the **upscale** toggle on the strip toolbar past **export**, not from the setup widgets |
 
-Outputs: `pin_specs`, `length`, `sequence`, `upscaling`.
+Outputs: `pin_specs`, `length`, `sequence`, `upscaling`, `chunk_audio` (AUDIO).
+`chunk_audio` supplies the upcoming generation's custom waveform, including
+pin overlaps, to an ASR node upstream of the video prompt. It is `None`
+without a custom track or in upscale mode.
 
 **Switching branches.** A workflow that can both generate a take and
 refine the timeline holds two branches that must never run together.

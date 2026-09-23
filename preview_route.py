@@ -1272,6 +1272,26 @@ def register():
     from aiohttp import web
     from server import PromptServer
 
+    @PromptServer.instance.routes.post("/obvpm/h3/audio_info")
+    async def _audio_info(request):
+        import asyncio
+        from .timeline_audio import load_audio, parse_track, track_id
+
+        def inspect(data):
+            import torch
+            track = parse_track(data)
+            audio = load_audio(track["file"])
+            wave = audio["waveform"].abs().amax(dim=(0, 1))
+            peaks = torch.nn.functional.adaptive_max_pool1d(
+                wave[None, None], min(2048, wave.numel())).flatten().tolist()
+            return {"duration": wave.numel() / audio["sample_rate"],
+                    "peaks": peaks, "id": track_id(track)}
+        try:
+            data = await request.json()
+            return web.json_response(await asyncio.to_thread(inspect, data))
+        except Exception as exc:
+            return web.json_response({"error": str(exc)}, status=400)
+
     @PromptServer.instance.routes.post("/obvpm/h3/preview_cut")
     async def _preview_cut(request):
         import asyncio

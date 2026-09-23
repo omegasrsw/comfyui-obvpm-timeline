@@ -725,6 +725,14 @@ class H3SaveVideoWithMCtx:
 
         from .nodes_pins import pins_trim_totals
         head, tail = pins_trim_totals(pins)
+        from .timeline_audio import LATENT_KEY, source_sound
+        custom_audio = samples.get(LATENT_KEY)
+        if custom_audio:
+            audio = source_sound(samples, head, delivered)
+            untrimmed_audio = source_sound(samples)
+            # Save the supplied audio latent, not the sampler's lip-sync
+            # resample, so future pins carry the same soundtrack.
+            audio_lat = custom_audio["latent"]
         if delivered != raw_frames - head - tail:
             raise ValueError(
                 "H3SaveVideoWithMCtx: %d delivered frames but the raw latent "
@@ -797,6 +805,9 @@ class H3SaveVideoWithMCtx:
             "overlap_frames": str(head if overlap else 0),
             "overlap_tail_frames": str(tail if overlap_tail else 0),
         }
+        if custom_audio:
+            import json
+            meta["timeline_audio"] = json.dumps(custom_audio["record"])
         sidecar = mctx.write_sidecar(
             mctx.sidecar_path(video_path), video_lat, audio_lat, meta,
             blobs=sidecar_blobs)
@@ -1067,9 +1078,16 @@ class H3TrimAndSaveVideoWithMCtx:
                       audio=None, pins=None, metadata="", prompt=None,
                       extra_pnginfo=None, conditioning=None):
         from .nodes_pins import H3TrimPinned
+        from .timeline_audio import source_sound
+        original_audio = source_sound(samples)
+        if original_audio is not None:
+            audio = original_audio
         raw_images, raw_audio = images, audio
         if pins:
             images, audio = H3TrimPinned().trim(images, pins, audio=audio)
+        if original_audio is not None:
+            from .nodes_pins import pins_trim_totals
+            audio = source_sound(samples, pins_trim_totals(pins)[0], len(images))
         (path,) = H3SaveVideoWithMCtx().save(
             images, samples, base_folder, filename_prefix, crf,
             save_conditioning=save_conditioning,

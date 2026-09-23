@@ -315,7 +315,8 @@ class H3MCtxPinSpec:
         return (list(pin_specs or []) + [spec],)
 
 
-def _prepare_pins(pin_specs, snap_window_down_to_available, ctx=None):
+def _prepare_pins(pin_specs, snap_window_down_to_available, ctx=None,
+                  timing_only=False):
     """Materialize specs into sliced pins. THE sole slicing site.
 
     Lives as a module function (not a node) since 2026-08-12: with Save
@@ -326,6 +327,10 @@ def _prepare_pins(pin_specs, snap_window_down_to_available, ctx=None):
 
     `ctx` carries what a PIXEL source needs and a latent one does not:
     the VAEs and the target resolution. Absent = latent sources only.
+
+    `timing_only` resolves the same ranges without slicing or encoding
+    tensors. Timeline uses it to supply chunk audio to ASR BEFORE the
+    transcript becomes conditioning for Apply Pins.
     """
     if not pin_specs:
         raise ValueError("H3MCtxApplyPins: the pin_specs stack is empty.")
@@ -334,10 +339,10 @@ def _prepare_pins(pin_specs, snap_window_down_to_available, ctx=None):
         kind = spec.get("source_kind")
         if kind == "clip":
             pins.append(_prepare_clip_pin(
-                i, spec, snap_window_down_to_available))
+                i, spec, snap_window_down_to_available, timing_only=timing_only))
         elif kind == "clip_pixels":
             pins.append(_prepare_pixel_pin(
-                i, spec, snap_window_down_to_available, ctx))
+                i, spec, snap_window_down_to_available, ctx, timing_only=timing_only))
         else:
             raise ValueError(
                 "H3MCtxApplyPins: spec %d has source_kind %r; known kinds "
@@ -346,7 +351,7 @@ def _prepare_pins(pin_specs, snap_window_down_to_available, ctx=None):
     return pins
 
 
-def _prepare_pixel_pin(i, spec, snap_down, ctx):
+def _prepare_pixel_pin(i, spec, snap_down, ctx, timing_only=False):
     """A pin from a clip with no usable sidecar: decode, encode, slice.
 
     The window is chosen in PIXEL space and encoded as a clip of exactly
@@ -369,7 +374,7 @@ def _prepare_pixel_pin(i, spec, snap_down, ctx):
         raise ValueError(
             "H3MCtxApplyPins: spec %d is a pixel source with no "
             "source_path." % i)
-    if not ctx or ctx.get("vae") is None or ctx.get("audio_vae") is None:
+    if not timing_only and (not ctx or ctx.get("vae") is None or ctx.get("audio_vae") is None):
         raise ValueError(
             "H3MCtxApplyPins: %s has no usable mctx sidecar, so pinning it "
             "means VAE-encoding its pixels -- connect the video_vae "
@@ -420,6 +425,10 @@ def _prepare_pixel_pin(i, spec, snap_down, ctx):
             "H3MCtxApplyPins: spec %d's %d frame window does not fit "
             "before frame %d of %s." % (i, n, available, clip))
 
+    if timing_only:
+        return {"source_id": "", "place": spec.get("place", "before"),
+                "covered": n, "spec": dict(spec, source_start=start, source_frames=n)}
+
     images, audio = ne.decode_window(path, start, n, info=info)
     a_window = int(spec.get("audio_window", 0) or 0)
     if a_window > n:
@@ -464,7 +473,7 @@ def _prepare_pixel_pin(i, spec, snap_down, ctx):
     return pin
 
 
-def _prepare_clip_pin(i, spec, snap_down):
+def _prepare_clip_pin(i, spec, snap_down, timing_only=False):
         bundle = spec.get("source")
         if bundle is None:
             raise ValueError(
@@ -566,6 +575,12 @@ def _prepare_clip_pin(i, spec, snap_down):
                 "H3MCtxApplyPins: spec %d's window (raw frames %d..%d) "
                 "exceeds the stored latent (%d frames)."
                 % (i, raw_start, raw_end, raw_frames))
+
+        if timing_only:
+            return {"source_id": bundle.get("self_id", ""),
+                    "place": spec.get("place", "before"), "covered": n,
+                    "spec": dict({k: v for k, v in spec.items() if k != "source"},
+                                 source_start=raw_start, source_frames=n)}
 
         video_slice = video[:1, :, k:k + steps].clone()
         covered = fr.pixel_frames(steps)
@@ -687,7 +702,8 @@ class H3MCtxApplyPins:
                                "emits those for imported footage). Pins "
                                "from a sidecar never touch a VAE."}),
                 "audio_vae": ("VAE", {
-                    "tooltip": "Audio VAE, for the same pixel-encoded pins "
+                    "tooltip": "H3 audio VAE. Required for the Timeline's "
+                               "custom audio track and for pixel-encoded pins "
                                "as video_vae -- required alongside it even "
                                "when the footage is silent."}),
                 "pin_specs": (wt.PINSPECS, {
@@ -737,6 +753,33 @@ class H3MCtxApplyPins:
               freeze_audio=False, pin_specs=None, video_vae=None,
               audio_vae=None, masked_audio_feather=8, audio_denoise=0.0,
               dynprompt=None, unique_id=None):
+        from .timeline_audio import MARKER, apply_audio
+        audio_specs = [s for s in (pin_specs or []) if s.get("source_kind") == MARKER]
+        if len(audio_specs) > 1:
+            raise ValueError("Apply Pins accepts one custom audio timeline per run.")
+        if audio_specs and audio_vae is None:
+            raise ValueError("Connect the H3 audio VAE to Apply Pins' audio_vae input to use custom timeline audio.")
+        if audio_specs and not nodes_masked.core_masks_available():
+            raise ValueError("Custom timeline audio requires ComfyUI's native H3 per-stream denoise masks. Update ComfyUI.")
+        if audio_specs and dynprompt is not None and unique_id is not None and not any(
+                isinstance(v, list) and len(v) == 2
+                and str(v[0]) == str(unique_id) and int(v[1]) == 1
+                for v in self._all_input_values(dynprompt)):
+            raise ValueError("Connect Apply Pins' latent output to the sampler to use custom audio.")
+        result = self._apply(conditioning, latent, snap_window_down_to_available,
+            freeze_audio=freeze_audio,
+            pin_specs=[s for s in (pin_specs or []) if s.get("source_kind") != MARKER],
+            video_vae=video_vae, audio_vae=audio_vae,
+            masked_audio_feather=masked_audio_feather, audio_denoise=audio_denoise,
+            dynprompt=dynprompt, unique_id=unique_id)
+        if audio_specs:
+            return apply_audio(*result, audio_specs[0], audio_vae)
+        return result
+
+    def _apply(self, conditioning, latent, snap_window_down_to_available,
+               freeze_audio=False, pin_specs=None, video_vae=None,
+               audio_vae=None, masked_audio_feather=8, audio_denoise=0.0,
+               dynprompt=None, unique_id=None):
         if not pin_specs:
             if freeze_audio:
                 # the first clip of a refine has nothing to pin and still

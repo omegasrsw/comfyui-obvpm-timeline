@@ -1,6 +1,7 @@
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 import { specHandover } from "./h3_handover.js";
+import { mountAudioTrack } from "./h3_timeline_audio.js";
 // drop-resolution helpers shared with the loader drop handler -- same
 // trust rules for drops into the timeline strip (in-place when the
 // content already lives in output, upload to dropped/ otherwise)
@@ -3422,7 +3423,7 @@ app.registerExtension({
             // over the node's real pins. Anything genuinely wired is
             // skipped, so driving the mode from a graph still works.
             dropWidgetSockets(node, ["pin_state", "sequence", "auto_add",
-                                     "snap_cuts_to_grid", "upscaling"]);
+                                     "snap_cuts_to_grid", "upscaling", "audio_track"]);
             // Editing the keyword re-renders the clip row, so the restore
             // button's enabled look tracks it instead of going stale.
             const rgWidget = node.widgets?.find(
@@ -3900,6 +3901,7 @@ app.registerExtension({
                 drawRuler();
                 drawLinks(lastEntries);
                 setPlayhead(displayFrame() ?? heldFrame);
+                audioLane.paint();
             }
             // Re-widths what is already on screen. Cheaper than a full
             // refresh (no probes, no metadata) and it keeps the blocks'
@@ -4315,8 +4317,13 @@ app.registerExtension({
                 () => String(widgetValue("preview_filename", "")
                              || "obvpm_h3_preview"),
                 progress);
+            const audioLane = mountAudioTrack({ node, api, strip,
+                geometry: () => ({ scale: scaleNow(), entries: lastEntries,
+                    starts: cumStarts, landing: pinLanding() }),
+                changed: () => refresh(),
+            });
             container.append(videoWrap, header, progress.el, timelineWrap,
-                             cutRow, infoRow, nextRunRow);
+                             audioLane.el, cutRow, infoRow, nextRunRow);
             videoWrap.append(...vids);
 
             const widget = node.addDOMWidget("mctx_timeline", "div",
@@ -7658,6 +7665,7 @@ app.registerExtension({
             // is H3MCtxPinSpec's job.
             const PIN_WINDOWS = ["22", "39", "56"];
             function renderNextRun() {
+                audioLane.paint();
                 const st = pinState();
                 const frame = barParts(nextRunRow, "next run");
                 const value = document.createElement("span");
@@ -8171,12 +8179,19 @@ app.registerExtension({
                 if (runModeWidget && typeof runModeWidget.value === "string") {
                     runModeWidget.value = runModeWidget.value === "upscale";
                 }
+                // Saved LiteGraph output arrays can predate the new
+                // AUDIO socket. Append it without shifting any links.
+                if (node.outputs?.length === 4
+                        && !node.outputs.some(o => o.name === "chunk_audio")) {
+                    node.addOutput("chunk_audio", "AUDIO");
+                }
                 void refresh();
                 return r;
             };
             const onRemoved = node.onRemoved;
             node.onRemoved = function () {
                 cancelAnimationFrame(rafId);
+                audioLane.dispose();
                 clearInterval(durPoll);
                 rulerRO.disconnect();
                 themeMO.disconnect();
