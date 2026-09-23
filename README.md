@@ -1,5 +1,7 @@
 # comfyui-obvpm-timeline
 
+This fork adds **custom audio for lip-sync generation** to the original obvpm timeline. See [what changed](#custom-audio-in-this-fork) and [how to use it](#using-custom-audio).
+
 A MiniMax H3 ComfyUI workflow and nodes that allow generating, extending, prepending, bridging and editing videos in an easy to use UI.
 
 The timeline node is like a mini video editor.
@@ -8,7 +10,20 @@ And it also supports creating seamless looping videos.
 
 <img src="assets/timeline-node.png" title="" alt="The Timeline node: three clips on the timeline, with the first one set to be prepended" width="804">
 
+## Custom audio in this fork
+
+- **Audio row below the video timeline:** upload or drop one soundtrack, view its waveform, audition it, and adjust its placement and source offset.
+- **Audio conditioning for lip sync:** the matching source audio is encoded into H3's audio latent during generation. The pack's Save / Trim and Save nodes write the original waveform into the saved video.
+- **Automatic chunk timing:** generate, extend, prepend, and bridge operations select their own audio start time and duration from the actual video frame range. Pinned overlaps are included, and picture and sound are trimmed together at the joins.
+- **Audio output for transcription:** Timeline's new **chunk_audio** output provides the exact waveform used for the upcoming chunk, including its overlaps, so an ASR model can transcribe it before the video prompt is encoded.
+- **Existing workflows remain supported:** removing the custom track restores generated-audio behavior. The original four Timeline output sockets keep their positions.
+
 ## Updates
+
+### Fork: custom audio
+
+- Added custom-audio conditioning, waveform controls, and the **chunk_audio** output.
+- Updated the included timeline workflow with audio-to-ASR prompt wiring and generation mode enabled for an empty timeline.
 
 ### 0.1.0 (2026-09-21)
 
@@ -84,15 +99,60 @@ Clone (or copy) this folder into `ComfyUI/custom_nodes`:
 
 ```
 cd ComfyUI/custom_nodes
-git clone https://github.com/chanon/comfyui-obvpm-timeline
+git clone https://github.com/omegasrsw/comfyui-obvpm-timeline.git
 ```
 
 Restart ComfyUI. No extra Python dependencies are required. A ComfyUI
 from 2026-08-13 or later is needed.
 
+If you already installed this fork, run `git pull` inside its folder, restart ComfyUI, and hard-refresh the browser with **Ctrl+F5**. Keep only one installed copy of the timeline pack.
+
+## Using custom audio
+
+1. Open the [included timeline workflow](workflows/h3_obvpm_timeline_r2v_v0.1.1-004.json). Use ComfyUI Manager's **Install Missing Custom Nodes** for any missing nodes. Its prompt branch uses Qwen3-ASR and LM Studio nodes; configure their models and your LM Studio connection, or replace that branch with your own ASR and prompt setup.
+2. On **H3 MCtx Timeline**, leave **upscaling** off when generating your first clip. Upscaling requires an existing sequence.
+3. Click **+ audio** below the video timeline, or drop your audio file onto that row. Upload your own file even if the example workflow shows a saved filename: workflow JSON stores the track settings, not the audio file itself.
+4. Set the audio controls below, then choose your video duration and prompt. Keep Timeline's **length** output connected to the generation latent's length so audio and video use the same actual frame count.
+5. Generate and add the result to the timeline. Select an extension, prepend, or bridge as usual; the corresponding audio window is calculated automatically for each run. Keep the intended soundtrack selected across takes.
+
+| Audio control | What it does |
+| --- | --- |
+| **place s** | Places the audio anchor on the original timeline. You can also drag the waveform. |
+| **source s** | Selects the source-file time at that anchor. For example, `30` starts the initial take at 30 seconds into the file, leaving earlier audio available for prepends. |
+| **length s** | Limits the source duration after the offset; `0` uses the rest of the file. Windows outside the available source are padded with silence. |
+| **lip sync** | Sets audio denoise during sampling; default `0.5`. `0` holds the supplied audio latent fixed. The pack's saver still delivers the original waveform. |
+| **▶ / ×** | Auditions the source from the selected offset / removes the custom track. |
+
+### Wiring another workflow
+
+The included workflow already connects the audio-conditioning path. For your own workflow, connect:
+
+- Timeline **pin_specs** → **H3 MCtx Apply Pins** → **pin_specs**.
+- H3 audio VAE → Apply Pins **audio_vae**.
+- Apply Pins **latent** → generation sampler's latent input, and **conditioning** → its guider.
+- Sampler output → **H3 MCtx Trim and Save Video** **samples**, with decoded images and Apply Pins **pins** connected as usual.
+
+Apply Pins crops and encodes the source audio automatically; no separate manual audio-crop or audio-encode chain is needed. Use this pack's Save or Trim and Save node to preserve the original soundtrack in the output.
+
+### Use the chunk transcript in your prompt
+
+Connect **Timeline → chunk_audio** to your ASR node's **audio** input, then insert its transcript into the video prompt before text conditioning. For example, combine your scene description with `The speaker says: <ASR transcript>`.
+
+The output contains the full upcoming generation window, including head/tail context and both bridge overlaps. It is available before Apply Pins and uses the same waveform that will be encoded, so this wiring does not create a dependency cycle. ASR timestamps start at the beginning of that raw chunk.
+
+**Bypass the ASR branch when no custom track is selected or when upscaling:** `chunk_audio` is `None` in those modes.
+
+### Timing and existing clips
+
+Adding or changing a track affects future generations; it does not redo existing clips' sound or mouth motion. Uploaded audio is stored in `ComfyUI/input/timeline_audio`; copy that file too when moving a workflow to another machine.
+
+Extensions include the previous clip's overlap, prepends include the destination overlap, and bridges include both. Saved audio coordinates keep existing takes aligned when prepending. A bridge must match both source clips' audio positions: if it reports incompatible timing, adjust the gap or generation length to the legal H3 length indicated by the error. A non-looping soundtrack cannot automatically wrap into an audio loop.
+
+See [custom audio setup and timing](docs/custom-audio.md) for the full details, including source offsets, bridge alignment, and third-party savers.
+
 ## Workflow
 
-The workflow is available in the [workflows](https://github.com/chanon/comfyui-obvpm-timeline/tree/main/workflows) folder.
+The workflow is available in this fork's [workflows](workflows) folder.
 
 ## Other Notes
 
